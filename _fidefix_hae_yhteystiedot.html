@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>HAE YHTEYSTIEDOT finrexin_nimet_ja_id.json -TIEDOSTOON!</title>
+<meta charset="utf-8">
+<script> window.addEventListener('load', function()
+{
+
+	function handleFileSelect(evt)
+	{
+		var files = evt.target.files; // FileList object
+		var output = [];
+		for (var f of files)
+		{
+			console.log("file name="+f.name+"  size="+f.size);
+
+			output.push('<li><strong>', escape(f.name), '</strong> (', f.type || 'n/a', ') - ',
+						f.size, ' bytes, last modified: ',
+						f.lastModifiedDate ? f.lastModifiedDate.toLocaleDateString() : 'n/a',
+						'</li>');
+			
+		}
+		document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+
+		var fr = new FileReader();
+		fr.onload = function(e)
+		{
+			var all = e.target.result;
+			listAllIpAddresses(all);
+			console.log("iprows="+ipRows.length);
+		}
+		fr.readAsText(f);
+	}
+			
+	document.getElementById('files').addEventListener('change', handleFileSelect, false);
+
+
+	var ipRows = new Array();
+	var ipRowsCount = 0;
+	var ipRow = new Array();
+	function listAllIpAddresses(all)
+	{
+		console.log("type="+typeof(all)+"  len="+all.length);
+		var data = JSON.parse(all); 
+		console.log("data="+data+"    data len="+data.length);
+
+		ipRows = new Array();
+		var table = "<table>";
+		var rowCounter = 0;
+		for (var i in data)
+		{
+			var result = data[i]["result"];
+			if (	result != "-" &&
+					result != "(request timeout)" &&
+					result != "(ei ole Fx2020.htm)" &&
+					result != "TXT_NoUserRights" &&
+					result != "COLIBRI" &&
+					!(result.substring(0, 3) == "VAK" && result.length < 7) &&
+					!(result.substring(0, 2) == "AK" && result.length < 6) &&
+					result != "WINDOWSCE")
+			{
+				var ipRow = new Array();
+				for (var ii in data[i])
+				{
+					if (ii != "contactinfo")
+					{
+						if (i == 0) console.log("ii="+ii+"  data[i][ii]="+data[i][ii]);
+						ipRow[ii] = data[i][ii];
+						ipRow["id"] = rowCounter;
+						table += "<td>" + ipRow[ii] + "</td>";
+					}
+				}
+				if (data[i]["contactinfo"] == null)
+					ipRow["contactinfo"] = "[contactinfo" + rowCounter + "]";
+				else
+					ipRow["contactinfo"] = data[i]["contactinfo"];
+				 
+				table += "<td><span id=\"contactinfo" + rowCounter + "\">" + ipRow["contactinfo"] + "</span></td>";
+				ipRows[rowCounter] = ipRow;
+				rowCounter++;
+				table += "<tr>";
+			}
+		}
+
+		document.getElementById("sisalto").innerHTML = table;
+		drawCoordinates();
+	}
+
+	var mapImageCanvas = document.querySelector("#mapImage");
+	var graphics = mapImageCanvas.getContext("2d");
+	mapImageCanvas.width = 10;
+	mapImageCanvas.height = 10;
+	function drawCoordinates()
+	{
+		for (var i in ipRows)
+		{
+			var LONG_MIN = 18.7;
+			var LONG_MAX = 31.605;
+			var LAT_MIN = 59.81;
+			var LAT_MAX = 70.086;
+			var long = ipRows[i]["longitude"]; //x
+			var lat = ipRows[i]["latitude"]; //y
+			var x = (long - LONG_MIN) * mapImageCanvas.width / (LONG_MAX - LONG_MIN);
+			var y = mapImageCanvas.height - (lat - LAT_MIN) * mapImageCanvas.height / (LAT_MAX - LAT_MIN);
+			graphics.fillStyle = `rgb(0,0,0)`;
+			graphics.fillRect(x-2, y-2, 5, 5);
+			graphics.fillStyle = `rgb(255,255,255)`;
+			graphics.fillRect(x-1, y-1, 3, 3);
+		}
+	}
+
+
+	var tempImage = new Image(); // load graphics from file
+	tempImage.src = 'suomenkartta.png';
+	tempImage.addEventListener('load', function()
+	{
+		mapImageCanvas.width = tempImage.width;
+		mapImageCanvas.height = tempImage.height;
+		graphics.drawImage(tempImage, 0, 0,
+		mapImageCanvas.width, mapImageCanvas.height, 0, 0, mapImageCanvas.width, mapImageCanvas.height);
+	}, false);
+
+
+	var currentContactinfoIndex = 0;
+	var maxContactinfoIndex = 0;
+	var currentIpAddress = "";
+	document.querySelector("#startButton").addEventListener("click", function()
+	{
+		currentContactinfoIndex = 0;
+
+		maxContactinfoIndex = 0; for (var i in ipRows) maxContactinfoIndex++;
+
+					//currentContactinfoIndex = 1;maxContactinfoIndex=2; // TESTI
+
+		searchNewContactInfo();
+	});
+
+
+	function searchNewContactInfo()
+	{
+		console.log("aloitetaan search i="+currentContactinfoIndex);
+		setContactinfo(currentContactinfoIndex, "haetaan....");
+
+		var r = new XMLHttpRequest();
+		r.timeout = 30000;
+		var fullUrl = "http://127.0.0.1:5002/?hakusana="+ipRows[currentContactinfoIndex]["result"];
+		r.open("GET", fullUrl);
+		r.addEventListener("load", function()
+		{
+			if (r.status >= 200 && r.status < 300)
+			{
+				var resp = r.responseText;
+				setContactinfo(currentContactinfoIndex, resp);
+				currentContactinfoIndex++;
+				if (currentContactinfoIndex < maxContactinfoIndex) setTimeout(searchNewContactInfo,100);
+			}
+			else
+			{
+				setContactinfo(currentContactinfoIndex, "(request status="+r.status+")");
+				currentContactinfoIndex++;
+				if (currentContactinfoIndex < maxContactinfoIndex) setTimeout(searchNewContactInfo,50);
+			}
+		});
+		r.onerror = function()
+		{
+			setContactinfo(currentContactinfoIndex, "(request error)");
+			currentContactinfoIndex++;
+			if (currentContactinfoIndex < maxContactinfoIndex) setTimeout(searchNewContactInfo,50);
+		}
+		r.ontimeout = function()
+		{
+			setContactinfo(currentContactinfoIndex, "(request timeout)");
+			currentContactinfoIndex++;
+			if (currentContactinfoIndex < maxContactinfoIndex) setTimeout(searchNewContactInfo,50);
+		}
+		r.send();
+	}
+
+	function setContactinfo(index, text)
+	{
+		console.log("setataan! index="+index+"  "+document.querySelector("#contactinfo"+index));
+		document.querySelector("#contactinfo"+index).innerHTML = text;
+		ipRows[index]["contactinfo"] = text;
+	}
+
+	document.querySelector("#saveButton").addEventListener("click", function()
+	{
+		console.log("talletus!");
+		var olio = {};
+		for (var i in ipRows)
+		{
+			olionRivi = {};
+			for (var ii in ipRows[i]) olionRivi[ii] = ipRows[i][ii];
+			olio[i] = olionRivi;
+		}
+		
+		oliojson = JSON.stringify(olio);
+		console.log("talletetaaan:"+oliojson);
+
+		var file = new Blob([oliojson], {type: "text/plain"});
+
+			var a = document.createElement("a")
+			var url = URL.createObjectURL(file);
+			a.href = url;
+			a.download = "finrexin_nimet_id_yhteystiedot.json";
+			document.body.appendChild(a);
+			a.click();
+			setTimeout(function() {
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url); 
+			}, 0);
+		
+
+
+	});
+
+
+});</script>
+
+<body>
+
+	<h2>HAE YHTEYSTIEDOT finrexin_nimet_ja_id.json -TIEDOSTOON!</h2>
+
+	<canvas id="mapImage" width="10" height="10"></canvas>
+
+	<input type="file" id="files" name="files[]" multiple />avaa: finrexin_nimet_ja_id.json!<br>
+	<button id="startButton">start search</button>
+	<button id="saveButton">save json</button>
+	<output id="list"></output>
+
+
+	<table id="sisalto">
+
+	</table>
+
+</body>
+</html>

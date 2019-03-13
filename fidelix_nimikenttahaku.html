@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>luetaan json-tiedosto</title>
+<meta charset="utf-8">
+<script> window.addEventListener('load', function()
+{
+
+	function handleFileSelect(evt)
+	{
+		var files = evt.target.files; // FileList object
+
+		// files is a FileList of File objects. List some properties.
+		var output = [];
+		for (var f of files)
+		{
+			console.log("file name="+f.name+"  size="+f.size);
+
+			output.push('<li><strong>', escape(f.name), '</strong> (', f.type || 'n/a', ') - ',
+						f.size, ' bytes, last modified: ',
+						f.lastModifiedDate ? f.lastModifiedDate.toLocaleDateString() : 'n/a',
+						'</li>');
+			
+		}
+		document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+
+		var fr = new FileReader();
+		fr.onload = function(e)
+		{
+			var all = e.target.result;
+			ipRows = new Array();
+			listAllIpAddresses(all);
+			console.log("iprows="+ipRows.length);
+		}
+		fr.readAsText(f);
+	}
+			
+	document.getElementById('files').addEventListener('change', handleFileSelect, false);
+
+
+	var ipRows = new Array();
+	var ipRowsCount = 0;
+	var ipRow = new Array();
+	function listAllIpAddresses(all)
+	{
+		console.log("type="+typeof(all)+"  len="+all.length);
+		var lines = all.split(/[\r\n]+/g);
+		console.log("linejä="+lines.length);
+
+		
+		var table = "<table>";
+		for (var i = 0; i < lines.length; i++)
+		{
+			
+			ipRow = null;
+			ParseJSON(lines[i]);
+			if (ipRow != null)
+			{
+				table += "<tr>";
+				ipRows[ipRowsCount] = ipRow;
+				table+=	"<td>"+ipRow[0]+"</td>"+
+						"<td>"+ipRow[1]+"</td>"+
+						"<td>"+ipRow[2].toFixed(2)+"</td>"+
+						"<td>"+ipRow[3].toFixed(2)+"</td>"+
+						"<td><span id=\"nimi"+ipRowsCount+"\">[nimi"+ipRowsCount+"]</span></td>";
+				table += "</tr>";
+				ipRowsCount++;
+			}
+			
+		}
+
+		document.getElementById("sisalto").innerHTML = table;
+		drawCoordinates();
+		startNameSearch();
+	}
+
+
+			var max = 7;
+			var table = "";
+			function ParseJSON(text)
+			{
+				var layerObject = null;
+				try
+				{
+					layerObject = JSON.parse(text); 
+				}
+				catch(err)
+				{
+					console.log("ei voi parsia:"+err);
+				}
+				if (layerObject != null)
+				{
+					ipRow = new Array();
+					luetteleLayer(layerObject, 0);
+				}
+			}
+
+			function luetteleLayer(layerObject, layerIndex)
+			{
+				for (var item in layerObject)
+				{
+					if (item == "ip_str") ipRow[0] = layerObject[item];
+					if (item == "org") ipRow[1] = layerObject[item];
+					if (item == "longitude") ipRow[2] = layerObject[item];
+					if (item == "latitude") ipRow[3] = layerObject[item];
+
+					var obj=layerObject[item];
+					var recursion = (typeof(obj) == "object") ? true : false;
+
+					if (recursion) luetteleLayer(obj, layerIndex + 1);
+				}
+			}
+
+
+	var mapImageCanvas = document.querySelector("#mapImage");
+	var graphics = mapImageCanvas.getContext("2d");
+	mapImageCanvas.width = 10;
+	mapImageCanvas.height = 10;
+	function drawCoordinates()
+	{
+		for (var i = 0; i < ipRows.length; i++)
+		{
+			var LONG_MIN = 18.7;
+			var LONG_MAX = 31.605;
+			var LAT_MIN = 59.81;
+			var LAT_MAX = 70.086;
+			var long = ipRows[i][2]; //x
+			var lat = ipRows[i][3]; //y
+			var x = (long - LONG_MIN) * mapImageCanvas.width / (LONG_MAX - LONG_MIN);
+			var y = mapImageCanvas.height - (lat - LAT_MIN) * mapImageCanvas.height / (LAT_MAX - LAT_MIN);
+			graphics.fillStyle = `rgb(0,0,0)`;
+			graphics.fillRect(x-2, y-2, 5, 5);
+			graphics.fillStyle = `rgb(255,255,255)`;
+			graphics.fillRect(x-1, y-1, 3, 3);
+		}
+	}
+
+
+	var tempImage = new Image(); // load graphics from file
+	tempImage.src = 'suomenkartta.png';
+	tempImage.addEventListener('load', function()
+	{
+		mapImageCanvas.width = tempImage.width;
+		mapImageCanvas.height = tempImage.height;
+		graphics.drawImage(tempImage, 0, 0,
+		mapImageCanvas.width, mapImageCanvas.height, 0, 0, mapImageCanvas.width, mapImageCanvas.height);
+	}, false);
+
+
+	var currentNameIndex = 0;
+	var maxNameIndex = 0;
+	var currentIpAddress = "";
+	function startNameSearch()
+	{
+		currentNameIndex = 0;
+		maxNameIndex = ipRows.length;
+		searchNewName();
+	}
+
+
+
+	function searchNewName()
+	{
+		document.querySelector("#nimi"+currentNameIndex).innerHTML="haetaan....";
+
+console.log("KENTTÄ="+document.querySelector("#nimi"+currentNameIndex)+" index="+currentNameIndex);
+
+		currentIpAddress = ipRows[currentNameIndex][0];
+		console.log("current ip address="+currentIpAddress);
+		if (currentIpAddress != null && currentIpAddress != "")
+		{
+			var r = new XMLHttpRequest();
+			r.timeout = 15000;
+			var fullAddress = "http://"+currentIpAddress+"/Report?File=Fx2020.htm";
+			r.open("GET", "http://127.0.0.1:5001/?address="+fullAddress+"&crawl=true");
+			//r.open("GET", currentIpAddress);
+			r.addEventListener("load", function()
+			{
+				if (r.status >= 200 && r.status < 300)
+				{
+					var resp = r.responseText;
+					findName(resp);
+					//console.log("resp="+resp);
+					//console.log("resp len="+resp.length);
+					currentNameIndex++;
+					if (currentNameIndex < maxNameIndex) setTimeout(searchNewName,100);
+				}
+				else
+				{
+					document.querySelector("#nimi"+currentNameIndex).innerHTML="(ei ole Fx2020.htm)";
+					currentNameIndex++;
+					if (currentNameIndex < maxNameIndex) setTimeout(searchNewName,50);
+				}
+			});
+			r.onerror = function()
+			{
+				console.log("nysse on errori")
+				document.querySelector("#nimi"+currentNameIndex).innerHTML="(request error)";
+				currentNameIndex++;
+				if (currentNameIndex < maxNameIndex) setTimeout(searchNewName,50);
+			}
+			r.ontimeout = function()
+			{
+				console.log("nysse on timeout")
+				document.querySelector("#nimi"+currentNameIndex).innerHTML="(request timeout)";
+				currentNameIndex++;
+				if (currentNameIndex < maxNameIndex) setTimeout(searchNewName,50);
+			}
+			r.send();
+		}
+	}
+
+	function findName(text)
+	{
+		var index = text.search("SubstationName");
+		if (index >= 0)
+		{
+			var temp = "";
+			for (var i = 0; i < 100; i++) temp+=text[index+i];
+			console.log("index="+index+"   temp="+temp);
+			temp = temp.split("'");
+			if (temp.length > 1)
+			{
+				document.querySelector("#nimi"+currentNameIndex).innerHTML=temp[1];
+			}
+			else
+			{
+				document.querySelector("#nimi"+currentNameIndex).innerHTML="-";
+			}
+		}
+
+	}
+
+	document.querySelector("#saveButton").addEventListener("click", function()
+	{
+		console.log("talletus!");
+		var olio = {};
+		for (var i = 0; i < ipRows.length; i++)
+		{
+			var kuvaus = document.querySelector("#nimi"+i).innerHTML;
+			var rivi = {"id":i,"ip":ipRows[i][0],"operator":ipRows[i][1],"longitude":ipRows[i][2].toFixed(3),"latitude":ipRows[i][3].toFixed(3),"result":kuvaus};
+			olio[i] = rivi;
+		}
+		
+		oliojson = JSON.stringify(olio);
+		console.log("talletetaaan:"+oliojson);
+
+		var file = new Blob([oliojson], {type: "text/plain"});
+
+			var a = document.createElement("a")
+			var url = URL.createObjectURL(file);
+			a.href = url;
+			a.download = "finrexin_nimet_ja_id(UUSI).json";
+			document.body.appendChild(a);
+			a.click();
+			setTimeout(function() {
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url); 
+			}, 0);
+		
+
+
+	});
+
+
+
+});</script>
+
+<body>
+
+	<h2>ETSI NIMIKENTÄT _fidelix-fi.json -TIEDOSTOON:</h2>
+
+	<canvas id="mapImage" width="10" height="10"></canvas>
+
+	<input type="file" id="files" name="files[]" multiple />AVAA: _fidelix-fi.json!<br>
+	<button id="saveButton">save json</button>
+	<output id="list"></output>
+
+	<table id="sisalto">
+
+	</table>
+
+</body>
+</html>
